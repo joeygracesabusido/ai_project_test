@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
+from pymongo.errors import ConnectionFailure
 from funds_agent import (
     get_funds_overview, get_petty_cash_status, get_advance_summary,
     _petty_cash_pipeline, _advance_pipeline, _account_balance_pipeline
@@ -110,3 +111,47 @@ class TestFundsAgent:
         assert isinstance(acct_pipeline, list)
         assert len(acct_pipeline) > 0
         assert "$lookup" in acct_pipeline[0]
+
+    def test_petty_cash_status_with_name_filter(self):
+        with patch("funds_agent.get_db") as mock_db, \
+             patch("funds_agent.execute_pipeline") as mock_exec:
+            mock_db.return_value = MagicMock()
+            mock_exec.return_value = [
+                {"name": "Office Supplies", "fundAmount": 5000.0, "currentBalance": 2500.0, "utilization": 50.0}
+            ]
+            result = get_petty_cash_status(name="Office Supplies")
+            assert "report" in result
+            assert "raw" in result
+            assert "collection" in result
+            assert result["collection"] == "petty_cash"
+            assert "Office Supplies" in result["report"]
+
+    def test_petty_cash_status_name_not_found(self):
+        with patch("funds_agent.get_db") as mock_db, \
+             patch("funds_agent.execute_pipeline") as mock_exec:
+            mock_db.return_value = MagicMock()
+            mock_exec.return_value = []
+            result = get_petty_cash_status(name="NonExistentFund")
+            assert "report" in result
+            assert "raw" in result
+            assert "collection" in result
+            assert "not found" in result["report"].lower()
+            assert result["raw"] == []
+
+    def test_petty_cash_status_db_error(self):
+        with patch("funds_agent.get_db") as mock_db:
+            mock_db.side_effect = ValueError("DATABASE_URL not set in .env")
+            result = get_petty_cash_status()
+            assert "Database error" in result["report"]
+            assert "raw" in result
+            assert "collection" in result
+            assert result["collection"] == "petty_cash"
+
+    def test_advance_summary_db_error(self):
+        with patch("funds_agent.get_db") as mock_db:
+            mock_db.side_effect = ConnectionFailure("Cannot connect to MongoDB")
+            result = get_advance_summary()
+            assert "Database error" in result["report"]
+            assert "raw" in result
+            assert "collection" in result
+            assert result["collection"] == "advances"
