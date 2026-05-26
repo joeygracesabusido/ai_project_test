@@ -94,3 +94,45 @@ class TestAgentEngine:
             result = run_query("show users")
             assert mock_gen.call_count == 3
             assert result["report"] == "Found 1 user."
+
+    def test_run_query_routes_attendance_command(self):
+        with patch("agent.get_db") as mock_db, \
+             patch("agent.introspect_schema") as mock_schema:
+            mock_db.return_value = MagicMock()
+            mock_schema.return_value = {"database": "test", "collections": {}, "collection_names": ["timelogs"]}
+            result = run_query("/attendance today")
+            assert "report" in result
+            assert result["collection"] == "timelogs"
+
+    def test_run_query_routes_funds_command(self):
+        with patch("agent.get_db") as mock_db:
+            mock_db.return_value = MagicMock()
+            result = run_query("/funds")
+            assert "report" in result
+
+    def test_run_query_routes_balance_command(self):
+        with patch("agent.get_db") as mock_db:
+            mock_db.return_value = MagicMock()
+            result = run_query("/balance")
+            assert "report" in result
+
+    def test_run_query_passes_through_normal_queries(self):
+        """Non-command queries should still hit the LLM path."""
+        with patch("agent.get_db") as mock_db, \
+             patch("agent.introspect_schema") as mock_schema, \
+             patch("agent.select_collection") as mock_select, \
+             patch("agent.generate_pipeline") as mock_gen, \
+             patch("agent.execute_pipeline") as mock_exec, \
+             patch("agent.interpret_results") as mock_interp:
+            mock_db.return_value = MagicMock()
+            mock_schema.return_value = {
+                "database": "test_db",
+                "collections": {"users": {"name": "str"}},
+                "collection_names": ["users"],
+            }
+            mock_select.return_value = "users"
+            mock_gen.return_value = [{"$limit": 5}]
+            mock_exec.return_value = [{"name": "Alice"}]
+            mock_interp.return_value = "Found 1 user."
+            result = run_query("show users")
+            assert result["report"] == "Found 1 user."
