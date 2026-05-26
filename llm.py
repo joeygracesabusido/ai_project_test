@@ -72,8 +72,59 @@ def pick_ollama_model() -> str:
         console.print(f"[red]Invalid choice. Enter 1-{len(models)}[/red]")
 
 
+def list_opencode_models() -> list[str]:
+    import subprocess
+    result = subprocess.run(
+        ["opencode", "models"],
+        capture_output=True, text=True, timeout=15,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to list opencode models: {result.stderr}")
+    return [line.strip() for line in result.stdout.strip().split("\n") if line.strip()]
+
+
+def pick_opencode_model() -> str:
+    from rich.console import Console
+    from rich.table import Table
+    console = Console()
+
+    models = list_opencode_models()
+    if not models:
+        raise RuntimeError("No opencode models found.")
+
+    table = Table(title="OpenCode Models")
+    table.add_column("#", style="bold")
+    table.add_column("Model")
+    for i, model in enumerate(models, 1):
+        table.add_row(str(i), model)
+    console.print(table)
+
+    while True:
+        try:
+            choice = input(f"Select model (1-{len(models)}): ").strip()
+            if not choice:
+                return models[0]
+            idx = int(choice) - 1
+            if 0 <= idx < len(models):
+                return models[idx]
+        except (ValueError, IndexError):
+            pass
+        console.print(f"[red]Invalid choice. Enter 1-{len(models)}[/red]")
+
+
 def _generate(prompt: str) -> str:
     provider = os.getenv("LLM_PROVIDER", "ollama")
+
+    if provider == "opencode":
+        import subprocess
+        model = os.getenv("OPENCODE_MODEL", "opencode/deepseek-v4-flash-free")
+        result = subprocess.run(
+            ["opencode", "run", "-m", model, prompt],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"opencode run failed: {result.stderr}")
+        return result.stdout.strip()
 
     if provider == "openai":
         base_url = os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com")
@@ -132,22 +183,28 @@ Return ONLY the collection name, nothing else."""
 
 
 def generate_pipeline(schema: dict, query: str) -> list:
+    import datetime
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     prompt = f"""You are a MongoDB expert. Given this database schema:
 
 Database: {schema['database']}
 Collections: {json.dumps(schema['collections'], indent=2)}
 
+Current Date and Time: {current_time}
+
 User query: "{query}"
 
 Generate a MongoDB aggregation pipeline that answers this query.
 Return ONLY a valid JSON array of pipeline stages. No explanations, no markdown.
-Example: [{{"$match": {{"status": "active"}}}}, {{"$group": {{"_id": "$category", "count": {{"$sum": 1}}}}}}]
+IMPORTANT: If you need to filter by a datetime field, you MUST use MongoDB Extended JSON syntax: {{"$date": "YYYY-MM-DDTHH:MM:SSZ"}}. Do not use $dateFromString for simple date filters.
+Example: [{{"$match": {{"status": "active", "date": {{"$gte": {{"$date": "2026-05-01T00:00:00Z"}}}}}}}}, {{"$group": {{"_id": "$category", "count": {{"$sum": 1}}}}}}]
 
 Pipeline:"""
 
     response = _generate(prompt)
     response = _clean_json_response(response)
-    pipeline = json.loads(response)
+    import bson.json_util
+    pipeline = bson.json_util.loads(response)
     if not isinstance(pipeline, list):
         raise ValueError("Pipeline must be a JSON array")
     return pipeline

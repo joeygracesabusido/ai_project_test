@@ -17,15 +17,28 @@ def _setup_provider():
     if provider == "ollama":
         _pick_ollama_model()
     elif provider == "opencode":
-        os.environ["LLM_PROVIDER"] = "openai"
-        os.environ["OPENAI_BASE_URL"] = os.getenv("OPENCODE_URL", "http://localhost:11434")
-        os.environ["OPENAI_API_KEY"] = "sk-no-key-required"
-        _pick_ollama_model()
-        os.environ["OPENAI_MODEL"] = os.getenv("OLLAMA_MODEL", "llama3.2")
+        _setup_opencode_provider()
     else:
         prompt_openai_api_key()
         model = os.getenv("OPENAI_MODEL", "deepseek-chat")
         console.print(f"[green]Using provider:[/green] OpenAI ({model})\n")
+
+
+def _setup_opencode_provider():
+    import os
+    from llm import pick_opencode_model
+    from formatter import console
+
+    try:
+        model = pick_opencode_model()
+    except RuntimeError as e:
+        from formatter import print_error
+        print_error(str(e))
+        return
+
+    os.environ["LLM_PROVIDER"] = "opencode"
+    os.environ["OPENCODE_MODEL"] = model
+    console.print(f"[green]Using model:[/green] {model}\n")
 
 
 def _pick_ollama_model():
@@ -68,9 +81,12 @@ def interactive_mode():
             _setup_provider()
             continue
         if raw == "/models":
-            _pick_ollama_model()
-            if os.getenv("LLM_PROVIDER", "ollama") == "openai":
-                os.environ["OPENAI_MODEL"] = os.getenv("OLLAMA_MODEL", "llama3.2")
+            if os.getenv("LLM_PROVIDER", "ollama") == "opencode":
+                _setup_opencode_provider()
+            else:
+                _pick_ollama_model()
+                if os.getenv("LLM_PROVIDER") == "openai":
+                    os.environ["OPENAI_MODEL"] = os.getenv("OLLAMA_MODEL", "llama3.2")
             continue
 
         try:

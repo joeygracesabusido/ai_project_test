@@ -3,7 +3,7 @@ import os
 import pytest
 import requests
 from unittest.mock import patch, MagicMock
-from llm import _generate, generate_pipeline, interpret_results, list_ollama_models, pick_ollama_model, pick_provider, prompt_openai_api_key
+from llm import _generate, generate_pipeline, interpret_results, list_ollama_models, list_opencode_models, pick_ollama_model, pick_opencode_model, pick_provider, prompt_openai_api_key
 
 
 class TestLlmLayer:
@@ -43,7 +43,8 @@ class TestLlmLayer:
             assert len(result) > 0
 
     def test_generate_raises_on_connection_error(self):
-        with patch("llm.requests.post") as mock_post:
+        with patch("llm.requests.post") as mock_post, \
+             patch.dict("os.environ", {"LLM_PROVIDER": "ollama"}, clear=False):
             mock_post.side_effect = requests.ConnectionError("Connection refused")
             with pytest.raises(requests.ConnectionError):
                 _generate("test prompt")
@@ -110,3 +111,62 @@ class TestLlmLayer:
         with patch("getpass.getpass", return_value="sk-new-key"):
             prompt_openai_api_key()
             assert os.environ.get("OPENAI_API_KEY") == "sk-new-key"
+
+    def test_list_opencode_models_returns_list(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = (
+                "opencode/big-pickle\nopencode/deepseek-v4-flash-free\nollama/minimax-m2.5:cloud\n"
+            )
+            result = list_opencode_models()
+            assert result == [
+                "opencode/big-pickle",
+                "opencode/deepseek-v4-flash-free",
+                "ollama/minimax-m2.5:cloud",
+            ]
+
+    def test_list_opencode_models_raises_on_error(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 1
+            mock_run.return_value.stderr = "opencode not found"
+            with pytest.raises(RuntimeError, match="Failed to list opencode models"):
+                list_opencode_models()
+
+    def test_pick_opencode_model_raises_on_empty(self):
+        with patch("llm.list_opencode_models", return_value=[]):
+            with pytest.raises(RuntimeError, match="No opencode models found"):
+                pick_opencode_model()
+
+    def test_pick_opencode_model_returns_selected(self):
+        models = ["opencode/deepseek-v4-flash-free", "opencode/big-pickle", "ollama/minimax-m2.5:cloud"]
+        with patch("llm.list_opencode_models", return_value=models), \
+             patch("builtins.input", return_value="2"):
+            result = pick_opencode_model()
+            assert result == "opencode/big-pickle"
+
+    def test_pick_opencode_model_defaults_to_first_on_empty_input(self):
+        models = ["opencode/deepseek-v4-flash-free", "opencode/big-pickle"]
+        with patch("llm.list_opencode_models", return_value=models), \
+             patch("builtins.input", return_value=""):
+            result = pick_opencode_model()
+            assert result == "opencode/deepseek-v4-flash-free"
+
+    def test_generate_opencode_calls_subprocess(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "Hello from opencode"
+            with patch.dict("os.environ", {"LLM_PROVIDER": "opencode", "OPENCODE_MODEL": "opencode/deepseek-v4-flash-free"}):
+                result = _generate("say hi")
+            assert result == "Hello from opencode"
+            mock_run.assert_called_once_with(
+                ["opencode", "run", "-m", "opencode/deepseek-v4-flash-free", "say hi"],
+                capture_output=True, text=True, timeout=120,
+            )
+
+    def test_generate_opencode_raises_on_error(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 1
+            mock_run.return_value.stderr = "model not found"
+            with patch.dict("os.environ", {"LLM_PROVIDER": "opencode"}):
+                with pytest.raises(RuntimeError, match="opencode run failed: model not found"):
+                    _generate("test")
