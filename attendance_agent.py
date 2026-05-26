@@ -1,4 +1,3 @@
-import os
 from datetime import datetime, timedelta, timezone, date
 from db import get_db, execute_pipeline
 from pymongo.errors import ConnectionFailure
