@@ -35,6 +35,7 @@ class TestAttendanceAgent:
             assert "report" in result
             assert "raw" in result
             assert "collection" in result
+            assert "pipeline" in result
             assert result["collection"] == "timelogs"
 
     def test_attendance_report_empty(self):
@@ -55,3 +56,5 @@ class TestAttendanceAgent:
             result = get_attendance_summary("month")
             assert "report" in result
             assert "raw" in result
+            assert "collection" in result
+            assert "pipeline" in result

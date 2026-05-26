@@ -50,7 +50,7 @@ def _build_attendance_pipeline(start: str, end: str, employee_name: str = None) 
         {"$sort": {"date": 1}},
     ]
     if employee_name:
-        pipeline[0]["$match"]["employee.fullName"] = {"$regex": employee_name, "$options": "i"}
+        pipeline.insert(3, {"$match": {"employee.fullName": {"$regex": employee_name, "$options": "i"}}})
     return pipeline
 
 def _build_summary_pipeline(start: str, end: str) -> list:
